@@ -12,8 +12,7 @@ import 'features/library/presentation/bloc/library_bloc.dart';
 import 'features/library/presentation/pages/library_page.dart';
 import 'features/recording/presentation/pages/recording_page.dart';
 import 'features/detail/presentation/pages/detail_page.dart';
-import 'features/knowledge/presentation/pages/knowledge_page.dart';
-import 'features/chat/presentation/pages/chat_page.dart';
+import 'features/library/presentation/pages/bookmarks_page.dart';
 import 'features/settings/presentation/pages/settings_page.dart';
 import 'features/translation/presentation/bloc/translation_bloc.dart';
 import 'features/library/domain/entities/recording.dart';
@@ -45,6 +44,8 @@ class _AetherAppState extends State<AetherApp> {
     await Hive.initFlutter();
     await ThemeManager.init();
     await di.initDependencies();
+    // Ensure splash screen is visible for at least 2 seconds after launching
+    await Future.delayed(const Duration(seconds: 2));
   }
 
   @override
@@ -55,7 +56,9 @@ class _AetherAppState extends State<AetherApp> {
         if (snapshot.connectionState != ConnectionState.done) {
           return MaterialApp(
             debugShowCheckedModeBanner: false,
-            home: SplashScreen(version: 'Aether v1.0.0'), // Replace with actual version if needed
+            home: SplashScreen(
+              version: 'Aether v1.0.0',
+            ), // Replace with actual version if needed
           );
         }
 
@@ -97,6 +100,10 @@ class _AetherAppState extends State<AetherApp> {
                       final recording = settings.arguments as Recording;
                       return MaterialPageRoute(
                         builder: (_) => DetailPage(recording: recording),
+                      );
+                    case '/bookmarks':
+                      return MaterialPageRoute(
+                        builder: (_) => const BookmarksPage(),
                       );
                     default:
                       return MaterialPageRoute(
@@ -227,27 +234,21 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
 
-  final List<Widget> _screens = const [
-    LibraryPage(),
-    KnowledgePage(),
-    ChatPage(),
-    SettingsPage(),
-  ];
+  final List<Widget> _screens = const [LibraryPage(), SettingsPage()];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: IndexedStack(index: _currentIndex, children: _screens),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(color: Theme.of(context).colorScheme.outline),
-          ),
-        ),
+      bottomNavigationBar: BottomAppBar(
+        shape: const CircularNotchedRectangle(),
+        notchMargin: 8,
+        elevation: 4,
+        color: Theme.of(context).colorScheme.surface,
         child: SafeArea(
-          child: SizedBox(
-            height: 64,
+          child: Container(
+            height: 48,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
@@ -257,24 +258,12 @@ class _MainShellState extends State<MainShell> {
                   isActive: _currentIndex == 0,
                   onTap: () => setState(() => _currentIndex = 0),
                 ),
-                _NavItem(
-                  icon: Icons.hub_outlined,
-                  label: 'Knowledge',
-                  isActive: _currentIndex == 1,
-                  onTap: () => setState(() => _currentIndex = 1),
-                ),
                 const SizedBox(width: 52),
-                _NavItem(
-                  icon: Icons.chat_bubble_outline,
-                  label: 'Chat',
-                  isActive: _currentIndex == 2,
-                  onTap: () => setState(() => _currentIndex = 2),
-                ),
                 _NavItem(
                   icon: Icons.settings_outlined,
                   label: 'Settings',
-                  isActive: _currentIndex == 3,
-                  onTap: () => setState(() => _currentIndex = 3),
+                  isActive: _currentIndex == 1,
+                  onTap: () => setState(() => _currentIndex = 1),
                 ),
               ],
             ),
@@ -294,7 +283,7 @@ class _MainShellState extends State<MainShell> {
           }
         },
         backgroundColor: Theme.of(context).colorScheme.primary,
-        elevation: 0,
+        elevation: 6,
         shape: const CircleBorder(),
         child: Icon(
           Icons.circle,
@@ -326,7 +315,7 @@ class _NavItem extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -353,4 +342,4 @@ class _NavItem extends StatelessWidget {
       ),
     );
   }
-} 
+}

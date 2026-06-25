@@ -119,7 +119,7 @@ class _LanguageModalState extends State<LanguageModal> {
                 return GestureDetector(
                   onTap: () {
                     widget.onSelect(lang);
-                    Navigator.pop(context, lang);
+                    Navigator.pop(context);
                   },
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 2),

@@ -20,7 +20,21 @@ class _WaveformWidgetState extends State<WaveformWidget>
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
-    )..repeat();
+    );
+    if (widget.isRecording) {
+      _controller.repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(WaveformWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isRecording && !oldWidget.isRecording) {
+      _controller.repeat();
+    } else if (!widget.isRecording && oldWidget.isRecording) {
+      _controller.stop();
+      _controller.reset();
+    }
   }
 
   @override

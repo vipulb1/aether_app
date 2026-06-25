@@ -10,6 +10,7 @@ class Recording extends Equatable {
   final List<TranscriptLine> transcript;
   final List<ActionItem> actions;
   final bool isRecording;
+  final bool bookmarked;
   final String? filePath;
   final String sourceLanguageCode;
 
@@ -23,6 +24,7 @@ class Recording extends Equatable {
     this.transcript = const [],
     this.actions = const [],
     this.isRecording = false,
+    this.bookmarked = false,
     this.filePath,
     this.sourceLanguageCode = 'en',
   });
@@ -35,7 +37,10 @@ class Recording extends Equatable {
     createdAt,
     duration,
     summary,
+    transcript,
+    actions,
     isRecording,
+    bookmarked,
     filePath,
     sourceLanguageCode,
   ];
@@ -60,6 +65,7 @@ class Recording extends Equatable {
       transcript: transcript ?? this.transcript,
       actions: actions ?? this.actions,
       isRecording: isRecording ?? this.isRecording,
+      bookmarked: bookmarked ?? this.bookmarked,
       filePath: filePath ?? this.filePath,
       sourceLanguageCode: sourceLanguageCode ?? this.sourceLanguageCode,
     );

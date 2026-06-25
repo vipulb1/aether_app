@@ -23,7 +23,7 @@ const List<Language> languages = [
   Language(code: 'it', name: 'Italian', native: 'Italiano', flag: '🇮🇹'),
   Language(code: 'pt', name: 'Portuguese', native: 'Português', flag: '🇧🇷'),
   Language(code: 'ru', name: 'Russian', native: 'Русский', flag: '🇷🇺'),
-  Language(code: 'zh', name: 'Chinese', native: '简体中文', flag: '🇨🇳'),
+  Language(code: 'zh-cn', name: 'Chinese', native: '简体中文', flag: '🇨🇳'),
   Language(code: 'ja', name: 'Japanese', native: '日本語', flag: '🇯🇵'),
   Language(code: 'ko', name: 'Korean', native: '한국어', flag: '🇰🇷'),
   Language(code: 'ar', name: 'Arabic', native: 'العربية', flag: '🇸🇦'),
@@ -50,8 +50,15 @@ const List<Language> languages = [
 ];
 
 Language languageByCode(String code) {
+  final normalizedCode = code.toLowerCase();
   return languages.firstWhere(
-    (lang) => lang.code == code,
-    orElse: () => languages.first,
+    (lang) => lang.code == normalizedCode,
+    orElse: () {
+      final prefix = normalizedCode.split('-').first;
+      return languages.firstWhere(
+        (lang) => lang.code == prefix,
+        orElse: () => languages.first,
+      );
+    },
   );
 }

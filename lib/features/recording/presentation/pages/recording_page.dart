@@ -309,8 +309,20 @@ class _RecordingView extends StatelessWidget {
                           icon: Icons.stop,
                           isDanger: true,
                           isLarge: true,
-                          onTap: () =>
-                              _promptStopRecording(context, state.title),
+                          onTap: () {
+                            // Pause recording before showing stop dialog
+                            context.read<RecordingBloc>().add(
+                              const PauseRecording(),
+                            );
+                            Future.delayed(
+                              const Duration(milliseconds: 100),
+                              () {
+                                if (context.mounted) {
+                                  _promptStopRecording(context, state.title);
+                                }
+                              },
+                            );
+                          },
                         ),
                         const SizedBox(width: 24),
                         _ActionButton(
@@ -405,7 +417,13 @@ class _RecordingView extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            onPressed: () {
+              Navigator.pop(ctx, false);
+              // Resume recording on cancel
+              if (context.mounted) {
+                context.read<RecordingBloc>().add(const ResumeRecording());
+              }
+            },
             child: const Text('Cancel'),
           ),
           TextButton(

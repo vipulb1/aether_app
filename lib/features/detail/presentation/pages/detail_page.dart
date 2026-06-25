@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:hive/hive.dart';
+import '../../../library/data/models/recording_model.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/services/transcription_service.dart';
 import '../../../library/domain/entities/recording.dart';
 import '../../../library/presentation/bloc/library_bloc.dart';
 import '../../../library/presentation/bloc/library_event.dart';
@@ -405,41 +410,159 @@ class _SummaryTab extends StatelessWidget {
   }
 }
 
-class _TranscriptTab extends StatelessWidget {
+class _TranscriptTab extends StatefulWidget {
   final Recording recording;
   const _TranscriptTab({required this.recording});
 
   @override
+  State<_TranscriptTab> createState() => _TranscriptTabState();
+}
+
+class _TranscriptTabState extends State<_TranscriptTab> {
+  final List<TranscriptLine> _transcriptLines = [];
+  StreamSubscription<List<TranscriptLine>>? _streamSubscription;
+  StreamSubscription? _boxSubscription;
+  bool _isProcessing = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _transcriptLines.addAll(widget.recording.transcript);
+    // Watch for external updates to this recording in the Hive box
+    try {
+      final box = Hive.box('recordings');
+      _boxSubscription = box.watch().listen((event) {
+        if (event.key == widget.recording.id) {
+          final value = box.get(widget.recording.id);
+          if (value == null) return;
+          final updated = RecordingModel.fromJson(
+            Map<String, dynamic>.from(value as Map),
+          );
+          if (!mounted) return;
+          setState(() {
+            _transcriptLines
+              ..clear()
+              ..addAll(updated.transcript);
+          });
+        }
+      });
+    } catch (_) {
+      _boxSubscription = null;
+    }
+    if (_transcriptLines.isEmpty) {
+      _startTranscription();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _TranscriptTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.recording.id != widget.recording.id ||
+        oldWidget.recording.transcript != widget.recording.transcript) {
+      _transcriptLines
+        ..clear()
+        ..addAll(widget.recording.transcript);
+      if (_transcriptLines.isEmpty && !_isProcessing) {
+        _startTranscription();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _streamSubscription?.cancel();
+    _boxSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _startTranscription() async {
+    if (widget.recording.filePath == null ||
+        widget.recording.filePath!.isEmpty) {
+      setState(() {
+        _errorMessage = 'No audio file available for transcription.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+      _errorMessage = null;
+    });
+
+    final stream = TranscriptionService.transcribeAudioStream(
+      widget.recording.filePath!,
+    );
+
+    _streamSubscription?.cancel();
+    _streamSubscription = stream.listen(
+      (chunk) {
+        setState(() {
+          _transcriptLines.addAll(chunk);
+        });
+      },
+      onError: (error) {
+        if (!mounted) return;
+        setState(() {
+          _isProcessing = false;
+          _errorMessage = 'Transcript failed: ${error.toString()}';
+        });
+      },
+      onDone: () async {
+        if (!mounted) return;
+        setState(() {
+          _isProcessing = false;
+        });
+
+        if (_transcriptLines.isNotEmpty) {
+          final updatedRecording = widget.recording.copyWith(
+            transcript: List<TranscriptLine>.from(_transcriptLines),
+          );
+          context.read<LibraryBloc>().add(
+            UpdateRecordingRequested(updatedRecording),
+          );
+        }
+      },
+      cancelOnError: true,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (recording.transcript.isEmpty) {
+    if (_errorMessage != null) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 48,
-              height: 48,
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-                strokeWidth: 4,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Processing transcript…',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _startTranscription,
+                child: const Text('Retry transcription'),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     }
+
+    if (_transcriptLines.isEmpty) {
+      return const _ProcessingTranscriptAnimation();
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.all(20),
-      itemCount: recording.transcript.length,
+      itemCount: _transcriptLines.length,
       itemBuilder: (_, i) {
-        final line = recording.transcript[i];
+        final line = _transcriptLines[i];
         return Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Column(
@@ -465,6 +588,80 @@ class _TranscriptTab extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _ProcessingTranscriptAnimation extends StatefulWidget {
+  const _ProcessingTranscriptAnimation();
+
+  @override
+  State<_ProcessingTranscriptAnimation> createState() =>
+      _ProcessingTranscriptAnimationState();
+}
+
+class _ProcessingTranscriptAnimationState
+    extends State<_ProcessingTranscriptAnimation>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+  late Animation<int> _dotsAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+
+    _dotsAnimation = IntTween(begin: 0, end: 3).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.description_outlined,
+            size: 64,
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.6),
+          ),
+          const SizedBox(height: 24),
+          AnimatedBuilder(
+            animation: _dotsAnimation,
+            builder: (context, child) {
+              final dots = '.' * (_dotsAnimation.value + 1);
+              return Text(
+                'Processing transcript$dots',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 16,
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'This may take a few moments',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontSize: 13,
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withOpacity(0.7),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -537,9 +734,134 @@ class _ActionsTab extends StatelessWidget {
   }
 }
 
-class _TranslateTab extends StatelessWidget {
+class _TranslateTab extends StatefulWidget {
   final Recording recording;
   const _TranslateTab({required this.recording});
+
+  @override
+  State<_TranslateTab> createState() => _TranslateTabState();
+}
+
+class _TranslateTabState extends State<_TranslateTab> {
+  final List<TranscriptLine> _transcriptLines = [];
+  StreamSubscription<List<TranscriptLine>>? _transcriptionSubscription;
+  bool _isTranscriptGenerating = false;
+  String? _transcriptError;
+
+  @override
+  void initState() {
+    super.initState();
+    _transcriptLines.addAll(widget.recording.transcript);
+    if (_transcriptLines.isEmpty) {
+      _generateTranscript();
+    } else {
+      _translateIfReady();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _TranslateTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.recording.id != widget.recording.id) {
+      _transcriptionSubscription?.cancel();
+      _transcriptLines
+        ..clear()
+        ..addAll(widget.recording.transcript);
+      _transcriptError = null;
+      _isTranscriptGenerating = false;
+      if (_transcriptLines.isEmpty) {
+        _generateTranscript();
+      } else {
+        _translateIfReady();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _transcriptionSubscription?.cancel();
+    super.dispose();
+  }
+
+  Language get _sourceLanguage => languageByCode('en');
+
+  Future<void> _generateTranscript() async {
+    if (widget.recording.filePath == null ||
+        widget.recording.filePath!.isEmpty) {
+      setState(() {
+        _transcriptError = 'No audio file available for transcription.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isTranscriptGenerating = true;
+      _transcriptError = null;
+    });
+
+    final stream = TranscriptionService.transcribeAudioStream(
+      widget.recording.filePath!,
+    );
+    _transcriptionSubscription = stream.listen(
+      (chunk) {
+        if (!mounted) return;
+        setState(() {
+          _transcriptLines.addAll(chunk);
+        });
+      },
+      onError: (error) {
+        if (!mounted) return;
+        setState(() {
+          _isTranscriptGenerating = false;
+          _transcriptError =
+              'Transcript generation failed: ${error.toString()}';
+        });
+      },
+      onDone: () {
+        if (!mounted) return;
+        setState(() {
+          _isTranscriptGenerating = false;
+        });
+        _persistTranscript();
+        _translateIfReady();
+      },
+      cancelOnError: true,
+    );
+  }
+
+  void _translateIfReady() {
+    final targetLanguage = context
+        .read<TranslationBloc>()
+        .state
+        .selectedLanguage;
+    if (targetLanguage != null && _transcriptLines.isNotEmpty) {
+      context.read<TranslationBloc>().add(
+        TranslateTranscript(_transcriptLines, _sourceLanguage, targetLanguage),
+      );
+    }
+  }
+
+  void _onTargetSelected(Language language) {
+    if (!mounted) return;
+    context.read<TranslationBloc>().add(SelectLanguage(language));
+    if (_transcriptLines.isNotEmpty) {
+      context.read<TranslationBloc>().add(
+        TranslateTranscript(_transcriptLines, _sourceLanguage, language),
+      );
+    }
+  }
+
+  Future<void> _persistTranscript() async {
+    if (_transcriptLines.isEmpty) return;
+    final updatedRecording = widget.recording.copyWith(
+      transcript: List<TranscriptLine>.from(_transcriptLines),
+    );
+    if (mounted) {
+      context.read<LibraryBloc>().add(
+        UpdateRecordingRequested(updatedRecording),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -547,33 +869,68 @@ class _TranslateTab extends StatelessWidget {
       value: context.read<TranslationBloc>(),
       child: BlocBuilder<TranslationBloc, TranslationState>(
         builder: (context, state) {
+          final sourceLanguage = _sourceLanguage;
+          final selectedLanguage = state.selectedLanguage;
+          final isTranslating = state.status == TranslationStatus.translating;
+          final hasTranscript = _transcriptLines.isNotEmpty;
+          final hasTranslation =
+              state.translatedLines != null && selectedLanguage != null;
+
           return SingleChildScrollView(
             padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(
+                  'Source language',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${sourceLanguage.flag} ${sourceLanguage.name}',
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        'English (US)',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
                 GestureDetector(
                   onTap: () async {
-                    final lang = await showModalBottomSheet<Language>(
+                    await showModalBottomSheet<Language>(
                       context: context,
                       isScrollControlled: true,
                       backgroundColor: Colors.transparent,
                       builder: (_) => LanguageModal(
                         selectedCode: state.selectedLanguage?.code,
-                        onSelect: (l) => context.read<TranslationBloc>().add(
-                          SelectLanguage(l),
-                        ),
+                        onSelect: _onTargetSelected,
                       ),
                     );
-                    if (lang != null && context.mounted) {
-                      context.read<TranslationBloc>().add(
-                        TranslateTranscript(
-                          recording.transcript,
-                          languageByCode(recording.sourceLanguageCode),
-                          lang,
-                        ),
-                      );
-                    }
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -597,9 +954,9 @@ class _TranslateTab extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          state.selectedLanguage != null
-                              ? '${state.selectedLanguage!.flag} ${state.selectedLanguage!.name}'
-                              : 'Select language',
+                          selectedLanguage != null
+                              ? '${selectedLanguage.flag} ${selectedLanguage.name}'
+                              : 'Select target language',
                           style: Theme.of(context).textTheme.bodyLarge
                               ?.copyWith(fontWeight: FontWeight.w500),
                         ),
@@ -614,13 +971,100 @@ class _TranslateTab extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 24),
-                if (state.status == TranslationStatus.translating)
+                if (_transcriptError != null)
                   Center(
-                    child: CircularProgressIndicator(
-                      color: Theme.of(context).colorScheme.primary,
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _transcriptError!,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                          ),
+                          const SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed: _generateTranscript,
+                            child: const Text('Retry transcript generation'),
+                          ),
+                        ],
+                      ),
                     ),
                   )
-                else if (state.translatedLines != null)
+                else if (_isTranscriptGenerating)
+                  Center(
+                    child: Column(
+                      children: [
+                        CircularProgressIndicator(
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Generating transcript...',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        if (selectedLanguage != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              'Translation will begin after transcript is ready.',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                      ],
+                    ),
+                  )
+                else if (isTranslating)
+                  const _ProcessingTranscriptAnimation()
+                else if (hasTranscript && !hasTranslation)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Original transcript',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      ..._transcriptLines.map(
+                        (line) => Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                line.speaker,
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.primary,
+                                      letterSpacing: 0.5,
+                                    ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                line.text,
+                                style: Theme.of(context).textTheme.bodyLarge
+                                    ?.copyWith(fontSize: 15, height: 1.7),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                else if (hasTranslation && state.translatedLines!.isNotEmpty)
                   ...state.translatedLines!.map(
                     (line) => Padding(
                       padding: const EdgeInsets.only(bottom: 16),
@@ -645,7 +1089,7 @@ class _TranslateTab extends StatelessWidget {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'ORIGINAL (${languageByCode(recording.sourceLanguageCode).name.toUpperCase()})',
+                            'ORIGINAL (${sourceLanguage.name.toUpperCase()})',
                             style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(
                                   fontSize: 11,
@@ -674,6 +1118,27 @@ class _TranslateTab extends StatelessWidget {
                       ),
                     ),
                   )
+                else if (!hasTranscript)
+                  Center(
+                    child: Column(
+                      children: [
+                        const Text('📝', style: TextStyle(fontSize: 36)),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Transcript generation is in progress.',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          selectedLanguage != null
+                              ? 'Translation will begin in ${selectedLanguage.name} once ready.'
+                              : 'Select a language to translate once the transcript is ready.',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  )
                 else
                   Center(
                     child: Column(
@@ -681,25 +1146,16 @@ class _TranslateTab extends StatelessWidget {
                         const Text('🌐', style: TextStyle(fontSize: 36)),
                         const SizedBox(height: 12),
                         Text(
-                          'Choose a language to translate',
-                          style: Theme.of(context).textTheme.bodyLarge
-                              ?.copyWith(
-                                fontSize: 15,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
+                          selectedLanguage != null
+                              ? 'Tap the language selector again to translate the transcript.'
+                              : 'Choose a language to translate the transcript.',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyLarge,
                         ),
                         const SizedBox(height: 4),
                         Text(
                           'Supports 112 languages',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                fontSize: 13,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
                     ),

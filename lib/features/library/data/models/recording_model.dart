@@ -11,6 +11,7 @@ class RecordingModel extends Recording {
     super.transcript,
     super.actions,
     super.isRecording,
+    super.bookmarked,
     super.filePath,
     super.sourceLanguageCode,
   });
@@ -44,6 +45,7 @@ class RecordingModel extends Recording {
               .toList() ??
           [],
       isRecording: json['is_recording'] as bool? ?? false,
+      bookmarked: json['bookmarked'] as bool? ?? false,
       filePath: json['file_path'] as String?,
       sourceLanguageCode: json['source_language_code'] as String? ?? 'en',
     );
@@ -60,6 +62,7 @@ class RecordingModel extends Recording {
       transcript: recording.transcript,
       actions: recording.actions,
       isRecording: recording.isRecording,
+      bookmarked: recording.bookmarked,
       filePath: recording.filePath,
       sourceLanguageCode: recording.sourceLanguageCode,
     );
@@ -72,6 +75,7 @@ class RecordingModel extends Recording {
     List<TranscriptLine>? transcript,
     List<ActionItem>? actions,
     bool? isRecording,
+    bool? bookmarked,
     String? filePath,
     String? sourceLanguageCode,
   }) {
@@ -85,6 +89,7 @@ class RecordingModel extends Recording {
       transcript: transcript ?? this.transcript,
       actions: actions ?? this.actions,
       isRecording: isRecording ?? this.isRecording,
+      bookmarked: bookmarked ?? this.bookmarked,
       filePath: filePath ?? this.filePath,
       sourceLanguageCode: sourceLanguageCode ?? this.sourceLanguageCode,
     );
@@ -103,6 +108,7 @@ class RecordingModel extends Recording {
           .toList(),
       'actions': actions.map((a) => {'text': a.text, 'done': a.done}).toList(),
       'is_recording': isRecording,
+      'bookmarked': bookmarked,
       'file_path': filePath,
       'source_language_code': sourceLanguageCode,
     };

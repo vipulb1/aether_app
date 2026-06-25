@@ -41,6 +41,7 @@ dependencies:
 
   # Functional Programming
   dartz: ^0.10.1
+  whisper_flutter_new: ^1.0.1
 
   # Local Storage (Offline-First)
   hive: ^2.2.3
@@ -49,6 +50,7 @@ dependencies:
   # Network
   http: ^1.2.2
   connectivity_plus: ^6.1.0
+  translator: ^1.0.4+1
 
   # Audio playback
   audioplayers: ^6.8.0

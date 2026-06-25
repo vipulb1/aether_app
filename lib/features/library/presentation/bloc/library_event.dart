@@ -39,3 +39,10 @@ class RenameRecordingRequested extends LibraryEvent {
   @override
   List<Object> get props => [id, newTitle];
 }
+
+class UpdateRecordingRequested extends LibraryEvent {
+  final Recording recording;
+  const UpdateRecordingRequested(this.recording);
+  @override
+  List<Object?> get props => [recording];
+}

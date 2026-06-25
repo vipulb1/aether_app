@@ -83,38 +83,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: 16),
                 SwitchListTile(
-                  value: _showUserDetails,
-                  onChanged: _updateShowUserDetails,
-                  activeColor: Theme.of(context).colorScheme.primary,
-                  title: Text(
-                    'Show user details',
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                  subtitle: Text(
-                    'Display your profile name and avatar across the app',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  value: _enableNotifications,
-                  onChanged: _updateEnableNotifications,
-                  activeColor: Theme.of(context).colorScheme.primary,
-                  title: Text(
-                    'Enable notifications',
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                  subtitle: Text(
-                    'Receive alerts for recordings, updates, and reminders',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile(
                   value: _isDarkMode,
                   onChanged: _updateThemeMode,
                   activeColor: Theme.of(context).colorScheme.primary,
@@ -131,7 +99,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'Account',
+                  'Bookmarked',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -143,20 +111,20 @@ class _SettingsPageState extends State<SettingsPage> {
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(
-                    'User details',
+                    'Bookmarked recordings',
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
                   subtitle: Text(
-                    'Your profile information is used to personalize the app.',
+                    'View recordings you marked as Bookmarked during recording.',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                   trailing: Icon(
-                    Icons.person_outline,
+                    Icons.chevron_right,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                  onTap: () {},
+                  onTap: () => Navigator.pushNamed(context, '/bookmarks'),
                 ),
               ],
             ),

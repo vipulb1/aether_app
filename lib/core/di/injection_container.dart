@@ -58,6 +58,7 @@ Future<void> initDependencies() async {
       searchRecordings: sl<SearchRecordings>(),
       deleteRecording: sl<DeleteRecording>(),
       renameRecording: sl<RenameRecording>(),
+      saveRecording: sl<SaveRecording>(),
     ),
   );
 

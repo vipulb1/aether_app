@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import '../../../../core/permissions/permission_service.dart';
 import '../../../library/domain/entities/recording.dart';
 import '../../../library/domain/usecases/save_recording.dart';
+import '../../../../core/services/transcription_service.dart';
 
 // ── Events ──
 abstract class RecordingEvent extends Equatable {
@@ -227,6 +228,9 @@ class RecordingBloc extends Bloc<RecordingEvent, RecordingViewState> {
           ? event.title!.trim()
           : state.title;
 
+      // Generate transcript from audio (sample data)
+      final transcript = _generateTranscriptFromAudio();
+
       final recording = Recording(
         id: const Uuid().v4(),
         title: title,
@@ -234,14 +238,36 @@ class RecordingBloc extends Bloc<RecordingEvent, RecordingViewState> {
         createdAt: DateTime.now(),
         duration: state.elapsed,
         filePath: audioFile.path,
-        sourceLanguageCode: 'en',
+        transcript: transcript,
+        sourceLanguageCode: 'en-US',
       );
       await saveRecording(recording);
       emit(state.copyWith(status: RecordingStatus.saved));
+
+      // Start transcription in background and persist final transcript when ready.
+      unawaited(_startBackgroundTranscription(audioFile.path, recording));
     } catch (_) {
       emit(state.copyWith(status: RecordingStatus.stopped));
     } finally {
       _currentRecordingPath = null;
+    }
+  }
+
+  Future<void> _startBackgroundTranscription(
+    String filePath,
+    Recording originalRecording,
+  ) async {
+    try {
+      final transcript = await TranscriptionService.transcribeAudio(filePath);
+      if (transcript.isNotEmpty) {
+        final updated = originalRecording.copyWith(transcript: transcript);
+        await saveRecording(updated);
+      }
+    } catch (e, st) {
+      // Log errors so we can debug why Whisper returns empty results.
+      // Do not rethrow to avoid blocking the UI flow.
+      print('Background transcription failed for $filePath: $e');
+      print(st);
     }
   }
 
@@ -293,6 +319,18 @@ class RecordingBloc extends Bloc<RecordingEvent, RecordingViewState> {
 
   void _onRename(RenameRecordingTitle event, Emitter<RecordingViewState> emit) {
     emit(state.copyWith(title: event.newTitle));
+  }
+
+  List<TranscriptLine> _generateTranscriptFromAudio() {
+    // This method generates transcript lines from the audio file
+    // In a real application, this would:
+    // 1. Call a speech-to-text API (Google Cloud Speech-to-Text, AWS Transcribe, etc.)
+    // 2. Process the audio chunks and get speaker diarization
+    // 3. Return formatted transcript lines
+    //
+    // For now, returning empty list to be populated later
+    // The actual transcript will be generated asynchronously after saving
+    return [];
   }
 
   @override
