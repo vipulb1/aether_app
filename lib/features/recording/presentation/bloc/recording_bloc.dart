@@ -240,6 +240,7 @@ class RecordingBloc extends Bloc<RecordingEvent, RecordingViewState> {
         filePath: audioFile.path,
         transcript: transcript,
         sourceLanguageCode: 'en-US',
+        bookmarked: state.bookmarked,
       );
       await saveRecording(recording);
       emit(state.copyWith(status: RecordingStatus.saved));

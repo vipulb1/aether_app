@@ -460,6 +460,29 @@ class _LibraryViewState extends State<_LibraryView> {
               const SizedBox(height: 16),
               ListTile(
                 leading: Icon(
+                  recording.bookmarked ? Icons.bookmark : Icons.bookmark_border,
+                  color: recording.bookmarked
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                title: Text(
+                  recording.bookmarked ? 'Remove bookmark' : 'Bookmark',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Theme.of(context).textTheme.bodyLarge?.color,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  final updatedRecording = recording.copyWith(
+                    bookmarked: !recording.bookmarked,
+                  );
+                  context.read<LibraryBloc>().add(
+                    UpdateRecordingRequested(updatedRecording),
+                  );
+                },
+              ),
+              ListTile(
+                leading: Icon(
                   Icons.edit_outlined,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),

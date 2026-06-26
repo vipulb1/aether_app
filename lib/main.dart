@@ -8,6 +8,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'core/di/injection_container.dart' as di;
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_manager.dart';
+import 'core/services/transcription_service.dart';
 import 'features/library/presentation/bloc/library_bloc.dart';
 import 'features/library/presentation/pages/library_page.dart';
 import 'features/recording/presentation/pages/recording_page.dart';
@@ -31,6 +32,7 @@ class AetherApp extends StatefulWidget {
 
 class _AetherAppState extends State<AetherApp> {
   late final Future<void> _initializationFuture;
+  bool _modelsLoadRequested = false;
   // late final Future<PackageInfo> _packageInfoFuture;
 
   @override
@@ -38,6 +40,11 @@ class _AetherAppState extends State<AetherApp> {
     super.initState();
     // _packageInfoFuture = PackageInfo.fromPlatform();
     _initializationFuture = _initializeApp();
+    _initializationFuture.then((_) {
+      if (!mounted || _modelsLoadRequested) return;
+      _modelsLoadRequested = true;
+      TranscriptionService.preloadWhisperModelsInBackground();
+    });
   }
 
   Future<void> _initializeApp() async {
@@ -67,6 +74,13 @@ class _AetherAppState extends State<AetherApp> {
             debugShowCheckedModeBanner: false,
             home: ErrorScreen(error: snapshot.error.toString()),
           );
+        }
+
+        if (!_modelsLoadRequested) {
+          _modelsLoadRequested = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            TranscriptionService.preloadWhisperModelsInBackground();
+          });
         }
 
         return MultiBlocProvider(
@@ -160,15 +174,6 @@ class SplashScreen extends StatelessWidget {
                   'Preparing your sound library…',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontSize: 16),
-                ),
-              ),
-              const SizedBox(height: 32),
-              const SizedBox(
-                width: 48,
-                height: 48,
-                child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  strokeWidth: 3,
                 ),
               ),
             ],

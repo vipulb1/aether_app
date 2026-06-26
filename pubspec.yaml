@@ -41,7 +41,7 @@ dependencies:
 
   # Functional Programming
   dartz: ^0.10.1
-  whisper_flutter_new: ^1.0.1
+  whisper_kit: ^0.3.1
 
   # Local Storage (Offline-First)
   hive: ^2.2.3

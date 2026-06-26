@@ -268,6 +268,31 @@ class _DetailPageState extends State<DetailPage> {
               const SizedBox(height: 16),
               ListTile(
                 leading: Icon(
+                  _recording.bookmarked
+                      ? Icons.bookmark
+                      : Icons.bookmark_border,
+                  color: _recording.bookmarked
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                title: Text(
+                  _recording.bookmarked ? 'Remove bookmark' : 'Bookmark',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() {
+                    _recording = _recording.copyWith(
+                      bookmarked: !_recording.bookmarked,
+                    );
+                  });
+                  context.read<LibraryBloc>().add(
+                    UpdateRecordingRequested(_recording),
+                  );
+                },
+              ),
+              ListTile(
+                leading: Icon(
                   Icons.edit_outlined,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),

@@ -52,6 +52,7 @@ class Recording extends Equatable {
     List<TranscriptLine>? transcript,
     List<ActionItem>? actions,
     bool? isRecording,
+    bool? bookmarked,
     String? filePath,
     String? sourceLanguageCode,
   }) {

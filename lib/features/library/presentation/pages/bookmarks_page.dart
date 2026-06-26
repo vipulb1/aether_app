@@ -27,9 +27,9 @@ class BookmarksPage extends StatelessWidget {
         title: Text(
           'Bookmarks',
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface,
-                fontWeight: FontWeight.w600,
-              ),
+            color: Theme.of(context).colorScheme.onSurface,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
       body: BlocBuilder<LibraryBloc, LibraryState>(
@@ -63,16 +63,16 @@ class BookmarksPage extends StatelessWidget {
                     Text(
                       'No bookmarks yet',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Bookmark a recording while saving it to see it here.',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -93,14 +93,10 @@ class BookmarksPage extends StatelessWidget {
                 recording: recording,
                 onTap: () {
                   // Navigate to the recording details page
-                  Navigator.pushNamed(
-                    context,
-                    '/recording_details',
-                    arguments: recording,
-                  );
+                  Navigator.pushNamed(context, '/detail', arguments: recording);
                 },
                 onLongPress: () {
-                   _showCardMenu(context, recording);
+                  _showCardMenu(context, recording);
                 },
               );
             },
@@ -153,6 +149,29 @@ class BookmarksPage extends StatelessWidget {
               ),
 
               const SizedBox(height: 16),
+              ListTile(
+                leading: Icon(
+                  recording.bookmarked ? Icons.bookmark : Icons.bookmark_border,
+                  color: recording.bookmarked
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                title: Text(
+                  recording.bookmarked ? 'Remove bookmark' : 'Bookmark',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Theme.of(context).textTheme.bodyLarge?.color,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  final updatedRecording = recording.copyWith(
+                    bookmarked: !recording.bookmarked,
+                  );
+                  context.read<LibraryBloc>().add(
+                    UpdateRecordingRequested(updatedRecording),
+                  );
+                },
+              ),
               ListTile(
                 leading: Icon(
                   Icons.edit_outlined,
@@ -279,4 +298,3 @@ class BookmarksPage extends StatelessWidget {
     );
   }
 }
-

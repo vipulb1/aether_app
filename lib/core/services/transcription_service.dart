@@ -2,11 +2,16 @@ import 'dart:io';
 import 'dart:math' as Math;
 import 'dart:typed_data';
 
-import 'package:whisper_flutter_new/whisper_flutter_new.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:whisper_kit/download_model.dart';
+import 'package:whisper_kit/whisper_kit.dart';
 
 import '../../features/library/domain/entities/recording.dart';
 
 class TranscriptionService {
+  static final Whisper _whisper = Whisper(model: WhisperModel.tiny);
+  static final Whisper _whisperLarge = Whisper(model: WhisperModel.largeV2);
+
   /// Transcribe audio file using Whisper Kit.
   ///
   /// The Whisper class downloads the chosen model automatically on first use.
@@ -84,7 +89,21 @@ class TranscriptionService {
       print('Failed to read header for $pathToTranscribe: $e');
     }
 
-    final whisper = Whisper(model: WhisperModel.tiny);
+    await _ensureWhisperModelDownloaded();
+
+    // Safety: prevent passing extremely large files or zero-length paths
+    if (pathToTranscribe.isEmpty) {
+      throw Exception('Invalid transcription path: empty');
+    }
+    final fileForTranscribe = File(pathToTranscribe);
+    final fileLength = await fileForTranscribe.length();
+    // Arbitrary large file guard (200MB) to avoid native OOM/crash
+    const maxFileBytes = 200 * 1024 * 1024;
+    if (fileLength > maxFileBytes) {
+      throw Exception(
+        'Audio file too large for transcription: $fileLength bytes',
+      );
+    }
 
     final request = TranscribeRequest(
       audio: pathToTranscribe,
@@ -94,9 +113,17 @@ class TranscriptionService {
 
     WhisperTranscribeResponse result;
     try {
-      result = await whisper.transcribe(transcribeRequest: request);
+      // Wrap the native call with additional logging to capture native crash hints
+      print(
+        'Calling Whisper.transcribe for $pathToTranscribe (size=${fileLength} bytes)',
+      );
+      result = await _whisper.transcribe(transcribeRequest: request);
+      print('Whisper.transcribe completed for $pathToTranscribe');
     } catch (e, st) {
-      throw Exception('Whisper transcribe failed: $e\n$st');
+      // Include file info in exception to aid debugging native crashes
+      throw Exception(
+        'Whisper transcribe failed for $pathToTranscribe: $e\n$st',
+      );
     } finally {
       try {
         if (tempResampled != null && await tempResampled.exists()) {
@@ -124,6 +151,66 @@ class TranscriptionService {
     final transcriptLines = _buildTranscriptLines(result);
     for (final line in transcriptLines) {
       yield [line];
+    }
+  }
+
+  static Future<String> _getWhisperModelDir() async {
+    if (Platform.isAndroid) {
+      final directory = await getApplicationSupportDirectory();
+      return directory.path;
+    }
+    final directory = await getLibraryDirectory();
+    return directory.path;
+  }
+
+  static Future<void> _ensureWhisperModelDownloaded() async {
+    await _ensureSpecificWhisperModelDownloaded(_whisper);
+  }
+
+  static Future<void> _ensureSpecificWhisperModelDownloaded(
+    Whisper whisper,
+  ) async {
+    try {
+      final modelDir = await _getWhisperModelDir();
+      await Directory(modelDir).create(recursive: true);
+      final File modelFile = File(whisper.model.getPath(modelDir));
+      if (!await modelFile.exists()) {
+        print(
+          'Whisper model missing, downloading ${whisper.model.modelName} to $modelDir',
+        );
+        await downloadModel(model: whisper.model, destinationPath: modelDir);
+        if (!await modelFile.exists()) {
+          throw Exception(
+            'Whisper model download failed for ${modelFile.path}',
+          );
+        }
+      } else {
+        print('Whisper model already available at ${modelFile.path}');
+      }
+    } catch (e, st) {
+      print('Failed to ensure Whisper model availability: $e\n$st');
+      rethrow;
+    }
+  }
+
+  static Future<void> preloadWhisperModels() async {
+    await _ensureSpecificWhisperModelDownloaded(_whisper);
+    await _ensureSpecificWhisperModelDownloaded(_whisperLarge);
+  }
+
+  static Future<void> preloadWhisperModelsInBackground({
+    Duration retryDelay = const Duration(seconds: 30),
+  }) async {
+    while (true) {
+      try {
+        await preloadWhisperModels();
+        print('Whisper models are available');
+        return;
+      } catch (e, st) {
+        print('Whisper model preload failed: $e\n$st');
+        print('Retrying Whisper model download in ${retryDelay.inSeconds}s');
+        await Future.delayed(retryDelay);
+      }
     }
   }
 
