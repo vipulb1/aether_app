@@ -10,6 +10,7 @@ class RecordingModel extends Recording {
     super.summary,
     super.transcript,
     super.actions,
+    super.notes,
     super.isRecording,
     super.bookmarked,
     super.filePath,
@@ -44,6 +45,19 @@ class RecordingModel extends Recording {
               )
               .toList() ??
           [],
+      notes:
+          (json['notes'] as List<dynamic>?)
+              ?.map(
+                (n) => RecordingNote(
+                  id: n['id'] as String,
+                  start: Duration(seconds: n['start_seconds'] as int),
+                  end: Duration(seconds: n['end_seconds'] as int),
+                  text: n['text'] as String,
+                  clipPath: n['clip_path'] as String?,
+                ),
+              )
+              .toList() ??
+          [],
       isRecording: json['is_recording'] as bool? ?? false,
       bookmarked: json['bookmarked'] as bool? ?? false,
       filePath: json['file_path'] as String?,
@@ -61,6 +75,7 @@ class RecordingModel extends Recording {
       summary: recording.summary,
       transcript: recording.transcript,
       actions: recording.actions,
+      notes: recording.notes,
       isRecording: recording.isRecording,
       bookmarked: recording.bookmarked,
       filePath: recording.filePath,
@@ -74,6 +89,7 @@ class RecordingModel extends Recording {
     String? summary,
     List<TranscriptLine>? transcript,
     List<ActionItem>? actions,
+    List<RecordingNote>? notes,
     bool? isRecording,
     bool? bookmarked,
     String? filePath,
@@ -88,6 +104,7 @@ class RecordingModel extends Recording {
       summary: summary ?? this.summary,
       transcript: transcript ?? this.transcript,
       actions: actions ?? this.actions,
+      notes: notes ?? this.notes,
       isRecording: isRecording ?? this.isRecording,
       bookmarked: bookmarked ?? this.bookmarked,
       filePath: filePath ?? this.filePath,
@@ -107,6 +124,17 @@ class RecordingModel extends Recording {
           .map((t) => {'speaker': t.speaker, 'text': t.text})
           .toList(),
       'actions': actions.map((a) => {'text': a.text, 'done': a.done}).toList(),
+      'notes': notes
+          .map(
+            (n) => {
+              'id': n.id,
+              'start_seconds': n.start.inSeconds,
+              'end_seconds': n.end.inSeconds,
+              'text': n.text,
+              'clip_path': n.clipPath,
+            },
+          )
+          .toList(),
       'is_recording': isRecording,
       'bookmarked': bookmarked,
       'file_path': filePath,

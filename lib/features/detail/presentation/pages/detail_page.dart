@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../../library/data/models/recording_model.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/services/transcription_service.dart';
@@ -24,14 +25,23 @@ class DetailPage extends StatefulWidget {
 class _DetailPageState extends State<DetailPage> {
   late Recording _recording;
   final AudioPlayer _audioPlayer = AudioPlayer();
+  StreamSubscription? _boxSubscription;
   PlayerState _playerState = PlayerState.stopped;
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
+  RangeValues _selectedRange = const RangeValues(0, 0);
+  String? _selectedRangeNotes;
+  bool _isExtractingRangeNotes = false;
+  String? _rangeExtractionError;
+  bool _isRangePlaybackActive = false;
+  Duration _rangePlaybackEnd = Duration.zero;
 
   @override
   void initState() {
     super.initState();
     _recording = widget.recording;
+    _initializeSelectedRange();
+    _watchRecordingUpdates();
     _audioPlayer.onPlayerStateChanged.listen((state) {
       setState(() {
         _playerState = state;
@@ -43,22 +53,74 @@ class _DetailPageState extends State<DetailPage> {
       });
     });
     _audioPlayer.onPositionChanged.listen((position) {
-      setState(() {
-        _position = position;
-      });
+      if (_isRangePlaybackActive && position >= _rangePlaybackEnd) {
+        _audioPlayer.pause();
+        setState(() {
+          _isRangePlaybackActive = false;
+          _playerState = PlayerState.stopped;
+          _position = _rangePlaybackEnd;
+        });
+      } else {
+        setState(() {
+          _position = position;
+        });
+      }
     });
     _audioPlayer.onPlayerComplete.listen((_) {
       setState(() {
         _playerState = PlayerState.stopped;
-        _position = _duration;
+        _position = _isRangePlaybackActive ? _rangePlaybackEnd : _duration;
+        _isRangePlaybackActive = false;
       });
     });
   }
 
+  void _watchRecordingUpdates() {
+    try {
+      final box = Hive.box('recordings');
+      _boxSubscription = box.watch(key: _recording.id).listen((_) {
+        final value = box.get(_recording.id);
+        if (value == null) return;
+        final updated = RecordingModel.fromJson(
+          Map<String, dynamic>.from(value as Map),
+        );
+        if (!mounted) return;
+        setState(() {
+          _recording = updated;
+        });
+      });
+    } catch (_) {
+      _boxSubscription = null;
+    }
+  }
+
   @override
   void dispose() {
+    _boxSubscription?.cancel();
     _audioPlayer.dispose();
     super.dispose();
+  }
+
+  Future<void> _shareRecording() async {
+    if (_recording.filePath == null || _recording.filePath!.isEmpty) return;
+
+    final transcriptText = _recording.transcript.isEmpty
+        ? 'No transcript available.'
+        : _recording.transcript
+              .map((line) => '${line.speaker}: ${line.text}')
+              .join('\n');
+
+    final message = StringBuffer()
+      ..writeln('Recording: ${_recording.title}')
+      ..writeln('Duration: ${_recording.formattedDuration}')
+      ..writeln('\nTranscript:')
+      ..writeln(transcriptText);
+
+    await Share.shareXFiles(
+      [XFile(_recording.filePath!)],
+      text: message.toString(),
+      subject: _recording.title,
+    );
   }
 
   Future<void> _togglePlayback() async {
@@ -71,6 +133,134 @@ class _DetailPageState extends State<DetailPage> {
     } else {
       await _audioPlayer.play(DeviceFileSource(_recording.filePath!));
     }
+  }
+
+  void _initializeSelectedRange() {
+    final maxSeconds = (_recording.duration.inSeconds > 0)
+        ? _recording.duration.inSeconds.toDouble()
+        : 1.0;
+    final endSeconds = _recording.duration.inSeconds >= 10 ? 10.0 : maxSeconds;
+    _selectedRange = RangeValues(0, endSeconds);
+    _selectedRangeNotes = null;
+    _rangeExtractionError = null;
+  }
+
+  Future<void> _playSelectedRange() async {
+    if (_recording.filePath == null || _recording.filePath!.isEmpty) return;
+    final startSeconds = _selectedRange.start.round();
+    final endSeconds = _selectedRange.end.round();
+    if (endSeconds <= startSeconds) return;
+
+    final start = Duration(seconds: startSeconds);
+    final end = Duration(seconds: endSeconds);
+
+    if (_isRangePlaybackActive && _playerState == PlayerState.playing) {
+      await _audioPlayer.pause();
+      setState(() {
+        _isRangePlaybackActive = false;
+      });
+      return;
+    }
+
+    _rangePlaybackEnd = end;
+    _isRangePlaybackActive = true;
+    await _audioPlayer.play(
+      DeviceFileSource(_recording.filePath!),
+      position: start,
+    );
+    setState(() {});
+  }
+
+  Future<void> _playSavedClip(RecordingNote note) async {
+    if (note.clipPath == null || note.clipPath!.isEmpty) return;
+
+    if (_playerState == PlayerState.playing) {
+      await _audioPlayer.pause();
+      setState(() {
+        _isRangePlaybackActive = false;
+      });
+      return;
+    }
+
+    _rangePlaybackEnd = note.end;
+    _isRangePlaybackActive = true;
+    await _audioPlayer.play(
+      DeviceFileSource(note.clipPath!),
+      position: note.start,
+    );
+    setState(() {});
+  }
+
+  Future<void> _extractNotesForSelectedRange() async {
+    if (_recording.filePath == null || _recording.filePath!.isEmpty) return;
+    final startSeconds = _selectedRange.start.round();
+    final endSeconds = _selectedRange.end.round();
+    if (endSeconds <= startSeconds) return;
+
+    setState(() {
+      _isExtractingRangeNotes = true;
+      _rangeExtractionError = null;
+      _selectedRangeNotes = null;
+    });
+
+    try {
+      final notes = await TranscriptionService.transcribeAudioRange(
+        _recording.filePath!,
+        Duration(seconds: startSeconds),
+        Duration(seconds: endSeconds),
+      );
+      if (!mounted) return;
+      final noteText = notes.isNotEmpty
+          ? notes.map((line) => '${line.speaker}: ${line.text}').join('\n')
+          : 'No notes could be extracted from the selected interval.';
+
+      if (notes.isNotEmpty) {
+        final clipPath = await TranscriptionService.saveAudioClip(
+          _recording.filePath!,
+          Duration(seconds: startSeconds),
+          Duration(seconds: endSeconds),
+          _recording.id,
+        );
+
+        final newNote = RecordingNote(
+          id: '${_recording.id}-${DateTime.now().millisecondsSinceEpoch}',
+          start: Duration(seconds: startSeconds),
+          end: Duration(seconds: endSeconds),
+          text: noteText,
+          clipPath: clipPath,
+        );
+        final updatedRecording = _recording.copyWith(
+          notes: [..._recording.notes, newNote],
+        );
+        context.read<LibraryBloc>().add(
+          UpdateRecordingRequested(updatedRecording),
+        );
+        setState(() {
+          _recording = updatedRecording;
+          _selectedRangeNotes = noteText;
+        });
+      } else {
+        setState(() {
+          _selectedRangeNotes = noteText;
+        });
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _rangeExtractionError = error.toString();
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isExtractingRangeNotes = false;
+      });
+    }
+  }
+
+  void _updateSelectedRange(RangeValues values) {
+    setState(() {
+      _selectedRange = values;
+    });
   }
 
   void _rename() {
@@ -155,7 +345,7 @@ class _DetailPageState extends State<DetailPage> {
                 Icons.share,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-              onPressed: () {},
+              onPressed: _shareRecording,
             ),
             IconButton(
               icon: Icon(
@@ -216,7 +406,21 @@ class _DetailPageState extends State<DetailPage> {
                     duration: _duration,
                   ),
                   _TranscriptTab(recording: _recording),
-                  _ActionsTab(recording: _recording),
+                  _ActionsTab(
+                    recording: _recording,
+                    selectedRange: _selectedRange,
+                    isExtractingNotes: _isExtractingRangeNotes,
+                    extractedNotes: _selectedRangeNotes,
+                    extractionError: _rangeExtractionError,
+                    savedNotes: _recording.notes,
+                    onPlaySavedNote: _playSavedClip,
+                    isPlayingRange:
+                        _isRangePlaybackActive &&
+                        _playerState == PlayerState.playing,
+                    onPlaySelectedRange: _playSelectedRange,
+                    onExtractNotes: _extractNotesForSelectedRange,
+                    onRangeChanged: _updateSelectedRange,
+                  ),
                   _TranslateTab(recording: _recording),
                 ],
               ),
@@ -693,68 +897,308 @@ class _ProcessingTranscriptAnimationState
 
 class _ActionsTab extends StatelessWidget {
   final Recording recording;
-  const _ActionsTab({required this.recording});
+  final RangeValues selectedRange;
+  final bool isExtractingNotes;
+  final String? extractedNotes;
+  final String? extractionError;
+  final List<RecordingNote> savedNotes;
+  final Future<void> Function(RecordingNote note) onPlaySavedNote;
+  final bool isPlayingRange;
+  final VoidCallback onPlaySelectedRange;
+  final VoidCallback onExtractNotes;
+  final ValueChanged<RangeValues> onRangeChanged;
+
+  const _ActionsTab({
+    required this.recording,
+    required this.selectedRange,
+    required this.isExtractingNotes,
+    required this.extractedNotes,
+    required this.extractionError,
+    required this.savedNotes,
+    required this.onPlaySavedNote,
+    required this.isPlayingRange,
+    required this.onPlaySelectedRange,
+    required this.onExtractNotes,
+    required this.onRangeChanged,
+  });
+
+  String _formatDuration(Duration value) {
+    final minutes = value.inMinutes.toString().padLeft(2, '0');
+    final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
 
   @override
   Widget build(BuildContext context) {
-    return ListView.builder(
+    final hasAudio =
+        recording.filePath != null && recording.filePath!.isNotEmpty;
+    final maxSeconds = recording.duration.inSeconds > 0
+        ? recording.duration.inSeconds.toDouble()
+        : 1.0;
+    final snapTo = maxSeconds < 1 ? 1 : maxSeconds.round();
+    return ListView(
       padding: const EdgeInsets.all(20),
-      itemCount: recording.actions.length,
-      itemBuilder: (_, i) {
-        final action = recording.actions[i];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Theme.of(context).colorScheme.outline),
+      children: [
+        Text(
+          'Play a selection',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          '${_formatDuration(Duration(seconds: selectedRange.start.round()))} — ${_formatDuration(Duration(seconds: selectedRange.end.round()))}',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 12),
+        RangeSlider(
+          values: selectedRange,
+          min: 0,
+          max: maxSeconds,
+          divisions: snapTo,
+          labels: RangeLabels(
+            _formatDuration(Duration(seconds: selectedRange.start.round())),
+            _formatDuration(Duration(seconds: selectedRange.end.round())),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: action.done
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.outline,
-                    width: 2,
-                  ),
-                  color: action.done
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
+          onChanged: hasAudio ? onRangeChanged : null,
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: hasAudio ? onPlaySelectedRange : null,
+                icon: Icon(
+                  isPlayingRange ? Icons.pause : Icons.play_arrow,
+                  color: Theme.of(context).colorScheme.onPrimary,
                 ),
-                alignment: Alignment.center,
-                child: action.done
-                    ? Text(
-                        '✓',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontSize: 13,
-                          color: Theme.of(context).scaffoldBackgroundColor,
+                label: Text(
+                  hasAudio
+                      ? (isPlayingRange ? 'Pause selection' : 'Play selection')
+                      : 'No audio available',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  disabledBackgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withOpacity(0.12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: hasAudio && !isExtractingNotes
+                    ? onExtractNotes
+                    : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    isExtractingNotes ? 'Extracting…' : 'Extract notes',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        if (extractionError != null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.errorContainer,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Text(
+              extractionError!,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onErrorContainer,
+              ),
+            ),
+          )
+        else if (extractedNotes != null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Theme.of(context).colorScheme.outline),
+            ),
+            child: Text(
+              extractedNotes!,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyLarge?.copyWith(height: 1.6),
+            ),
+          ),
+        if (savedNotes.isNotEmpty) ...[
+          const SizedBox(height: 24),
+          Text(
+            'Saved notes',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          ...savedNotes.map(
+            (note) => Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outline,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${_formatDuration(note.start)} — ${_formatDuration(note.end)}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    note.text,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyLarge?.copyWith(height: 1.6),
+                  ),
+                  if (note.clipPath != null) ...[
+                    const SizedBox(height: 10),
+                    TextButton.icon(
+                      onPressed: () {
+                        onPlaySavedNote(note);
+                      },
+                      icon: Icon(
+                        Icons.play_circle_outline,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      label: Text(
+                        'Play clip',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
                           fontWeight: FontWeight.w700,
                         ),
-                      )
-                    : null,
+                      ),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  action.text,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: action.done
-                        ? Theme.of(context).colorScheme.onSurfaceVariant
-                        : Theme.of(context).textTheme.bodyLarge?.color,
-                    decoration: action.done ? TextDecoration.lineThrough : null,
-                  ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 24),
+        Text(
+          'Actions',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 12),
+        if (recording.actions.isEmpty &&
+            recording.notes.isEmpty &&
+            extractedNotes == null)
+          Text(
+            'No actions available for this recording.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          )
+        else if (recording.actions.isNotEmpty)
+          ...recording.actions.map(
+            (action) => Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outline,
                 ),
               ),
-            ],
+              child: Row(
+                children: [
+                  Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: action.done
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.outline,
+                        width: 2,
+                      ),
+                      color: action.done
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
+                    ),
+                    alignment: Alignment.center,
+                    child: action.done
+                        ? Text(
+                            '✓',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  fontSize: 13,
+                                  color: Theme.of(
+                                    context,
+                                  ).scaffoldBackgroundColor,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      action.text,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: action.done
+                            ? Theme.of(context).colorScheme.onSurfaceVariant
+                            : Theme.of(context).textTheme.bodyLarge?.color,
+                        decoration: action.done
+                            ? TextDecoration.lineThrough
+                            : null,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        );
-      },
+      ],
     );
   }
 }
@@ -776,6 +1220,7 @@ class _TranslateTabState extends State<_TranslateTab> {
   @override
   void initState() {
     super.initState();
+    context.read<TranslationBloc>().add(const ResetTranslation());
     _transcriptLines.addAll(widget.recording.transcript);
     if (_transcriptLines.isEmpty) {
       _generateTranscript();
@@ -787,13 +1232,15 @@ class _TranslateTabState extends State<_TranslateTab> {
   @override
   void didUpdateWidget(covariant _TranslateTab oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.recording.id != widget.recording.id) {
+    if (oldWidget.recording.id != widget.recording.id ||
+        oldWidget.recording.transcript != widget.recording.transcript) {
       _transcriptionSubscription?.cancel();
       _transcriptLines
         ..clear()
         ..addAll(widget.recording.transcript);
       _transcriptError = null;
       _isTranscriptGenerating = false;
+      context.read<TranslationBloc>().add(const ResetTranslation());
       if (_transcriptLines.isEmpty) {
         _generateTranscript();
       } else {

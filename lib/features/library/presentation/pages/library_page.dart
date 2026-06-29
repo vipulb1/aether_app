@@ -173,22 +173,22 @@ class _LibraryViewState extends State<_LibraryView> {
             letterSpacing: -0.4,
           ),
         ),
-        actions: [
-          IconButton(
-            icon: Icon(
-              Icons.notifications_outlined,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-            onPressed: () {},
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.person_outline,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-            onPressed: () {},
-          ),
-        ],
+        // actions: [
+        //   IconButton(
+        //     icon: Icon(
+        //       Icons.notifications_outlined,
+        //       color: Theme.of(context).colorScheme.onSurfaceVariant,
+        //     ),
+        //     onPressed: () {},
+        //   ),
+        //   IconButton(
+        //     icon: Icon(
+        //       Icons.person_outline,
+        //       color: Theme.of(context).colorScheme.onSurfaceVariant,
+        //     ),
+        //     onPressed: () {},
+        //   ),
+        // ],
       ),
       body: Column(
         children: [

@@ -55,6 +55,7 @@ dependencies:
   # Audio playback
   audioplayers: ^6.8.0
   record: ^7.1.0
+  share_plus: ^13.2.0
 
   # Utilities
   uuid: ^4.5.1

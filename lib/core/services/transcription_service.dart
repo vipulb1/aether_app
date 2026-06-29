@@ -24,6 +24,65 @@ class TranscriptionService {
     return transcript;
   }
 
+  static Future<List<TranscriptLine>> transcribeAudioRange(
+    String filePath,
+    Duration start,
+    Duration end,
+  ) async {
+    if (end <= start) {
+      throw Exception('Invalid audio range: end must be after start.');
+    }
+
+    final sourceFile = File(filePath);
+    if (!await sourceFile.exists()) {
+      throw Exception('Audio file not found: $filePath');
+    }
+
+    final clippedFile = await _clipWavRange(sourceFile, start, end);
+    try {
+      return await transcribeAudio(clippedFile.path);
+    } catch (e) {
+      rethrow;
+    } finally {
+      try {
+        if (await clippedFile.exists()) {
+          await clippedFile.delete();
+        }
+      } catch (_) {}
+    }
+  }
+
+  static Future<String> saveAudioClip(
+    String filePath,
+    Duration start,
+    Duration end,
+    String recordingId,
+  ) async {
+    if (end <= start) {
+      throw Exception('Invalid audio range: end must be after start.');
+    }
+
+    final sourceFile = File(filePath);
+    if (!await sourceFile.exists()) {
+      throw Exception('Audio file not found: $filePath');
+    }
+
+    final clipFile = await _clipWavRange(sourceFile, start, end);
+    final directory = await getApplicationSupportDirectory();
+    final clipDir = Directory('${directory.path}/recording_clips');
+    await clipDir.create(recursive: true);
+    final clipName =
+        '${recordingId}_${DateTime.now().millisecondsSinceEpoch}.wav';
+    final persistentClip = File('${clipDir.path}/$clipName');
+    final savedClip = await clipFile.copy(persistentClip.path);
+    try {
+      if (await clipFile.exists()) {
+        await clipFile.delete();
+      }
+    } catch (_) {}
+    return savedClip.path;
+  }
+
   /// Transcribe audio in batches for the detail screen.
   static Stream<List<TranscriptLine>> transcribeAudioStream(
     String filePath,
@@ -484,6 +543,47 @@ List<int> _buildWavHeader({
   builder.add('data'.codeUnits);
   builder.add(_toLittleEndian(dataSize, 4));
   return builder.toBytes();
+}
+
+Future<File> _clipWavRange(File input, Duration start, Duration end) async {
+  final info = await _readWavHeader(input);
+  final data = await _extractWavData(input);
+  final numChannels = info['numChannels']!;
+  final sampleRate = info['sampleRate']!;
+  final bitsPerSample = info['bitsPerSample']!;
+  final bytesPerSample = bitsPerSample ~/ 8;
+  final bytesPerFrame = numChannels * bytesPerSample;
+
+  final startFrame = (start.inSeconds * sampleRate).round();
+  final endFrame = (end.inSeconds * sampleRate).round();
+  final totalFrames = data.length ~/ bytesPerFrame;
+  final clippedStartFrame = startFrame.clamp(0, totalFrames);
+  final clippedEndFrame = endFrame.clamp(0, totalFrames);
+  if (clippedEndFrame <= clippedStartFrame) {
+    throw Exception('Invalid trimmed interval for WAV audio.');
+  }
+
+  final clippedData = data.sublist(
+    clippedStartFrame * bytesPerFrame,
+    clippedEndFrame * bytesPerFrame,
+  );
+
+  final tempDir = await getTemporaryDirectory();
+  final tempFile = File(
+    '${tempDir.path}/${input.uri.pathSegments.last.replaceAll('.wav', '')}_${start.inSeconds}_${end.inSeconds}.wav',
+  );
+  final header = _buildWavHeader(
+    sampleCount: clippedEndFrame - clippedStartFrame,
+    numChannels: numChannels,
+    sampleRate: sampleRate,
+    bitsPerSample: bitsPerSample,
+  );
+
+  final builder = BytesBuilder();
+  builder.add(header);
+  builder.add(clippedData);
+  await tempFile.writeAsBytes(builder.toBytes(), flush: true);
+  return tempFile;
 }
 
 List<int> _toLittleEndian(int value, int byteCount) {

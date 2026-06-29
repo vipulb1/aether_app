@@ -30,6 +30,10 @@ class TranslateTranscript extends TranslationEvent {
   List<Object> get props => [lines, sourceLanguage, targetLanguage];
 }
 
+class ResetTranslation extends TranslationEvent {
+  const ResetTranslation();
+}
+
 enum TranslationStatus { initial, translating, done, error }
 
 class TranslatedLine {
@@ -88,10 +92,18 @@ class TranslationBloc extends Bloc<TranslationEvent, TranslationState> {
     : super(const TranslationState()) {
     on<SelectLanguage>(_onSelectLanguage);
     on<TranslateTranscript>(_onTranslateTranscript);
+    on<ResetTranslation>(_onResetTranslation);
   }
 
   void _onSelectLanguage(SelectLanguage event, Emitter<TranslationState> emit) {
     emit(state.copyWith(selectedLanguage: event.language));
+  }
+
+  void _onResetTranslation(
+    ResetTranslation event,
+    Emitter<TranslationState> emit,
+  ) {
+    emit(const TranslationState());
   }
 
   Future<void> _onTranslateTranscript(
@@ -110,10 +122,7 @@ class TranslationBloc extends Bloc<TranslationEvent, TranslationState> {
               targetLanguage: event.targetLanguage,
             ),
           );
-          return result.fold(
-            (_) => '[${event.targetLanguage.code.toUpperCase()}] ${line.text}',
-            (translated) => translated,
-          );
+          return result.fold((_) => line.text, (translated) => translated);
         }),
       );
 

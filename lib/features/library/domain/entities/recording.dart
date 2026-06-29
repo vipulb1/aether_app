@@ -9,6 +9,7 @@ class Recording extends Equatable {
   final String summary;
   final List<TranscriptLine> transcript;
   final List<ActionItem> actions;
+  final List<RecordingNote> notes;
   final bool isRecording;
   final bool bookmarked;
   final String? filePath;
@@ -23,6 +24,7 @@ class Recording extends Equatable {
     this.summary = '',
     this.transcript = const [],
     this.actions = const [],
+    this.notes = const [],
     this.isRecording = false,
     this.bookmarked = false,
     this.filePath,
@@ -39,6 +41,7 @@ class Recording extends Equatable {
     summary,
     transcript,
     actions,
+    notes,
     isRecording,
     bookmarked,
     filePath,
@@ -51,6 +54,7 @@ class Recording extends Equatable {
     String? summary,
     List<TranscriptLine>? transcript,
     List<ActionItem>? actions,
+    List<RecordingNote>? notes,
     bool? isRecording,
     bool? bookmarked,
     String? filePath,
@@ -65,6 +69,7 @@ class Recording extends Equatable {
       summary: summary ?? this.summary,
       transcript: transcript ?? this.transcript,
       actions: actions ?? this.actions,
+      notes: notes ?? this.notes,
       isRecording: isRecording ?? this.isRecording,
       bookmarked: bookmarked ?? this.bookmarked,
       filePath: filePath ?? this.filePath,
@@ -118,4 +123,23 @@ class ActionItem extends Equatable {
   @override
   List<Object?> get props => [text, done];
   ActionItem toggle() => ActionItem(text: text, done: !done);
+}
+
+class RecordingNote extends Equatable {
+  final String id;
+  final Duration start;
+  final Duration end;
+  final String text;
+  final String? clipPath;
+
+  const RecordingNote({
+    required this.id,
+    required this.start,
+    required this.end,
+    required this.text,
+    this.clipPath,
+  });
+
+  @override
+  List<Object?> get props => [id, start, end, text, clipPath];
 }

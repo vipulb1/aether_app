@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/permissions/permission_service.dart';
+import '../../../library/presentation/bloc/library_bloc.dart';
+import '../../../library/presentation/bloc/library_event.dart';
 import '../bloc/recording_bloc.dart';
 import '../widgets/waveform.dart';
 
@@ -136,6 +138,7 @@ class _RecordingView extends StatelessWidget {
     return BlocListener<RecordingBloc, RecordingViewState>(
       listener: (context, state) {
         if (state.status == RecordingStatus.saved) {
+          context.read<LibraryBloc>().add(const LoadRecordings());
           Navigator.pop(context, true); // signal library to reload
         }
       },
